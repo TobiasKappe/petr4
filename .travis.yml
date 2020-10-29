@@ -37,4 +37,4 @@ script:
   - opam install . --deps-only
   - make
   - make install
-  - make test
+  - make ci-test
