@@ -141,7 +141,8 @@ Section Syntax.
   | StatSwLabName (tags: tags_t) (_: P4String).
 
   Inductive StatementSwitchCase :=
-  | StatSwCaseAction (tags: tags_t) (label: StatementSwitchLabel) (code: Block)
+  | StatSwCaseAction (tags: tags_t) (label: StatementSwitchLabel)
+                     (code: list Statement)
   | StatSwCaseFallThrough (tags: tags_t) (label: StatementSwitchLabel)
   with StatementPreT :=
   | StatMethodCall (func: Expression) (type_args: list P4Type)
@@ -149,7 +150,7 @@ Section Syntax.
   | StatAssignment (lhs: Expression) (rhs: Expression)
   | StatDirectApplication (typ: P4Type) (args: list Expression)
   | StatConditional (cond: Expression) (tru: Statement) (fls: option Statement)
-  | StatBlock (block: Block)
+  | StatBlock (statements: list Statement)
   | StatExit
   | StatEmpty
   | StatReturn (expr: option Expression)
@@ -158,17 +159,120 @@ Section Syntax.
                  (name: P4String) (value: ValueBase)
   | StatVariable  (typ: P4Type)
                  (name: P4String) (init: option Expression)
-  | StatInstantiation  (typ: P4Type)
-                      (args: list Expression) (name: P4String) (init: option Block)
+  | StatInstantiation  (typ: P4Type) (args: list Expression) (name: P4String)
+                       (init: option (list Statement))
   with Statement :=
-  | MkStatement (tags: tags_t) (stmt: StatementPreT) (typ: StmType)
-  with Block :=
-  | BlockEmpty (tags: tags_t)
-  | BlockCons (statement: Statement) (rest: Block).
+  | MkStatement (tags: tags_t) (stmt: StatementPreT) (typ: StmType).
 
-  Scheme statement_mut := Induction for Statement Sort Prop
-    with statementpre_mut := Induction for StatementPreT Sort Prop
-    with block_mut := Induction for Block Sort Prop.
+
+  Section statement_mut_ind.
+
+    Variables
+        (P: Statement -> Prop)
+        (P0: StatementPreT -> Prop)
+        (P1: list Statement -> Prop)
+        (P2: StatementSwitchCase -> Prop)
+        (P3: list StatementSwitchCase -> Prop)
+    .
+
+    Hypotheses
+        (H0: forall (tags : tags_t) (stmt : StatementPreT),
+               P0 stmt -> forall typ : StmType, P (MkStatement tags stmt typ))
+        (H1: forall (func : Expression)
+                    (type_args : list P4Type)
+                    (args : list (option Expression)),
+               P0 (StatMethodCall func type_args args))
+        (H2: forall lhs rhs : Expression, P0 (StatAssignment lhs rhs))
+        (H3: forall (typ : P4Type) (args : list Expression),
+               P0 (StatDirectApplication typ args))
+        (H4: forall (cond : Expression) (tru : Statement),
+               P tru -> P0 (StatConditional cond tru None))
+        (H5: forall (cond : Expression) (tru : Statement) (fls: Statement),
+               P tru -> P fls -> P0 (StatConditional cond tru (Some fls)))
+        (H6: forall block : list Statement,
+               P1 block -> P0 (StatBlock block))
+        (H7: P0 StatExit)
+        (H8: P0 StatEmpty)
+        (H9: forall expr : option Expression,
+               P0 (StatReturn expr))
+        (H10: forall (expr : Expression)
+                     (cases : list StatementSwitchCase),
+                P3 cases -> P0 (StatSwitch expr cases))
+        (H11: forall (typ : P4Type)
+                     (name : P4String)
+                     (value : ValueBase),
+              P0 (StatConstant typ name value))
+        (H12: forall (typ : P4Type)
+                     (name : P4String)
+                     (init : option Expression),
+                P0 (StatVariable typ name init))
+        (H13: forall (typ : P4Type)
+                     (args : list Expression)
+                     (name : P4String)
+                     (init : option (list Statement)),
+                P0 (StatInstantiation typ args name init))
+        (H14: P1 nil)
+        (H15: forall (statement : Statement),
+                P statement ->
+                forall (rest : list Statement),
+                  P1 rest -> P1 (statement :: rest)%list)
+        (H16: P3 nil)
+        (H17: forall (case: StatementSwitchCase),
+                P2 case ->
+                forall (rest: list StatementSwitchCase),
+                  P3 rest -> P3 (case :: rest)%list)
+        (H18: forall (tags: tags_t)
+                     (label: StatementSwitchLabel)
+                     (code: list Statement),
+                P1 code -> P2 (StatSwCaseAction tags label code))
+        (H19: forall (tags: tags_t) (label: StatementSwitchLabel),
+                P2 (StatSwCaseFallThrough tags label))
+    .
+
+    Fixpoint statement_mut (stmt: Statement): P stmt
+    :=
+      let statement_mut_block :=
+        fix f (block: list Statement) : P1 block :=
+          match block with
+          | nil => H14
+          | cons stmt_first block' =>
+            H15 stmt_first (statement_mut stmt_first) block' (f block')
+          end
+        in
+      let statement_mut_cases :=
+        fix f (cases: list StatementSwitchCase) : P3 cases :=
+          match cases with
+          | nil => H16
+          | cons case_first cases' =>
+            let Hcase := match case_first with
+            | StatSwCaseAction tags label code =>
+              H18 tags label code (statement_mut_block code)
+            | StatSwCaseFallThrough tags label => H19 tags label
+            end in H17 case_first Hcase cases' (f cases')
+          end
+        in
+      match stmt as x return P x with
+      | MkStatement tag stmt_pre typ =>
+        let Hblock := match stmt_pre as x return P0 x with
+        | StatMethodCall func type_args args => H1 func type_args args
+        | StatAssignment lhs rhs => H2 lhs rhs
+        | StatDirectApplication typ args => H3 typ args
+        | StatConditional cond tru None => H4 cond tru (statement_mut tru)
+        | StatConditional cond tru (Some fls) =>
+          H5 cond tru fls (statement_mut tru) (statement_mut fls)
+        | StatBlock block => H6 block (statement_mut_block block)
+        | StatExit => H7
+        | StatEmpty => H8
+        | StatReturn expr => H9 expr
+        | StatSwitch expr cases => H10 expr cases (statement_mut_cases cases)
+        | StatConstant typ name value => H11 typ name value
+        | StatVariable typ name init => H12 typ name init
+        | StatInstantiation typ args name init => H13 typ args name init
+        end in H0 tag stmt_pre Hblock typ
+      end
+    .
+
+  End statement_mut_ind.
 
   Inductive ParserCase :=
   | MkParserCase (tags: tags_t) (matches: list Match) (next: P4String).
@@ -189,7 +293,8 @@ Section Syntax.
   | DeclConstant (tags: tags_t)  (typ: P4Type)
                  (name: P4String) (value: ValueBase)
   | DeclInstantiation (tags: tags_t)  (typ: P4Type)
-                      (args: list Expression) (name: P4String) (init: option Block)
+                      (args: list Expression) (name: P4String)
+                      (init: option (list Statement))
   | DeclParser (tags: tags_t)  (name: P4String)
                (type_params: list P4String) (params: list P4Parameter)
                (constructor_params: list P4Parameter)
@@ -198,9 +303,10 @@ Section Syntax.
   | DeclControl (tags: tags_t)  (name: P4String)
                 (type_params: list P4String) (params: list P4Parameter)
                 (constructor_params: list P4Parameter) (locals: list Declaration)
-                (apply: Block)
+                (apply: list Statement)
   | DeclFunction (tags: tags_t) (ret: P4Type) (name: P4String)
-                 (type_params: list P4String) (params: list P4Parameter) (body: Block)
+                 (type_params: list P4String) (params: list P4Parameter)
+                 (body: list Statement)
   | DeclExternFunction (tags: tags_t)  (ret: P4Type)
                        (name: P4String) (type_params: list P4String)
                        (params: list P4Parameter)
@@ -210,7 +316,7 @@ Section Syntax.
                  (size: Expression) (name: P4String)
   | DeclAction (tags: tags_t)  (name: P4String)
                (data_params: list P4Parameter) (ctrl_params: list P4Parameter)
-               (body: Block)
+               (body: list Statement)
   | DeclTable (tags: tags_t)  (name: P4String)
               (key: list TableKey) (actions: list TableActionRef)
               (entries: option (list TableEntry))
@@ -262,7 +368,7 @@ Section Syntax.
   | MkValueLvalue (lvalue: ValuePreLvalue) (typ: P4Type).
 
   Inductive ValueFunctionImplementation :=
-  | ValFuncImplUser (scope: Env_EvalEnv) (body: Block)
+  | ValFuncImplUser (scope: Env_EvalEnv) (body: list Statement)
   | ValFuncImplExtern (name: String.t) (caller: option (ValueLoc * String.t))
   | ValFuncImplBuiltin (name: String.t) (caller: ValueLvalue).
 
@@ -273,11 +379,12 @@ Section Syntax.
   | ValObjTable (_: ValueTable)
   | ValObjControl (scope: Env_EvalEnv)
                   (params: list P4Parameter) (locals: list Declaration)
-                  (apply: Block)
+                  (apply: list Statement)
   | ValObjPackage (args: list (String.t * ValueLoc))
   | ValObjRuntime (loc: ValueLoc) (obj_name: String.t)
   | ValObjFun (params: list P4Parameter) (impl: ValueFunctionImplementation)
-  | ValObjAction (scope: Env_EvalEnv) (params: list P4Parameter) (body: Block)
+  | ValObjAction (scope: Env_EvalEnv) (params: list P4Parameter)
+                 (body: list Statement)
   | ValObjPacket (bits: list bool).
 
   Inductive ValueConstructor :=
@@ -287,7 +394,7 @@ Section Syntax.
   | ValConsTable (_: ValueTable)
   | ValConsControl (scope: Env_EvalEnv) (constructor_params: list P4Parameter)
                    (params: list P4Parameter) (locals: list Declaration)
-                   (apply: Block)
+                   (apply: list Statement)
   | ValConsPackage (params: list P4Parameter) (args: list (String.t * ValueLoc))
   | ValConsExternObj (_: list (String.t * list P4Parameter)).
 

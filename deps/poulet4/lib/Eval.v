@@ -228,10 +228,6 @@ Section Eval.
     then dummy_value _ (eval_packet_func obj name type_args args)
     else state_fail Internal.
 
-
-
-
-
   Definition eval_extern_func (name: String.t) (obj: ValueLvalue) (type_args: list P4Type) (args: list (option (Expression tags_t))): env_monad tags_t (Value tags_t).
   Admitted.
   (* TODO fix
@@ -255,49 +251,83 @@ Section Eval.
     | _ => state_fail Internal
     end.
 
-  Fixpoint eval_block (blk: Block tags_t) : env_monad tags_t unit :=
-    match blk with
-    | BlockEmpty _ _ =>
-      mret tt
-    | BlockCons _ stmt rest =>
-      eval_statement stmt;;
-      eval_block rest
+  Fixpoint eval_statement (stmt: Statement tags_t) : env_monad tags_t unit :=
+    let eval_block :=
+      fix f (block: list (Statement tags_t)) : env_monad tags_t unit :=
+        match block with
+        | nil =>
+          mret tt
+        | cons stmt block' =>
+          eval_statement stmt;;
+          f block'
+        end
+      in
+    let eval_statement_pre :=
+      fun (stmt_pre: StatementPreT tags_t) =>
+        match stmt_pre with
+        | StatMethodCall _ func type_args args =>
+          toss_value _ (eval_method_call func type_args args)
+        | StatAssignment _ lhs rhs =>
+          let* lval := eval_lvalue lhs in
+          let* val := eval_expression rhs in
+          update_lvalue _ tags_dummy lval val
+        | StatBlock _ block =>
+          map_env _ (push_scope _);;
+          eval_block block;;
+          lift_env_fn _ (pop_scope _)
+        | StatConstant _ type (MkP4String _ _ name) init =>
+          insert_environment _ name (ValBase _ init)
+        | StatVariable _ type (MkP4String _ _ name) init =>
+          let* value :=
+             match init with
+             | None => mret (default_value type)
+             | Some expr => eval_expression expr
+             end
+          in
+          insert_environment _ name value
+        | StatEmpty _ =>
+          mret tt
+        | StatInstantiation _ _ _ _ _
+        | StatDirectApplication _ _ _
+        | StatConditional _ _ _ _
+        | StatExit _
+        | StatReturn _ _
+        | StatSwitch _ _ _ =>
+          state_fail Internal
+        end
+      in
+    match stmt with
+    | MkStatement _ _ stmt_pre _ =>
+      eval_statement_pre stmt_pre
     end
-  with eval_statement (stmt: Statement tags_t) : env_monad tags_t unit :=
-    let 'MkStatement _ _ stmt _ := stmt in
-    eval_statement_pre stmt
-  with eval_statement_pre (stmt: StatementPreT tags_t) : env_monad tags_t unit :=
-         match stmt with
-         | StatMethodCall _ func type_args args =>
-           toss_value _ (eval_method_call func type_args args)
-         | StatAssignment _ lhs rhs =>
-           let* lval := eval_lvalue lhs in
-           let* val := eval_expression rhs in
-           update_lvalue _ tags_dummy lval val
-         | StatBlock _ block =>
-           map_env _ (push_scope _);;
-           eval_block block;;
-           lift_env_fn _ (pop_scope _)
-         | StatConstant _ type (MkP4String _ _ name) init =>
-           insert_environment _ name (ValBase _ init)
-         | StatVariable _ type (MkP4String _ _ name) init =>
-           let* value :=
-              match init with
-              | None => mret (default_value type)
-              | Some expr => eval_expression expr
-              end
-           in
-           insert_environment _ name value
-         | StatEmpty _ =>
-           mret tt
-         | StatInstantiation _ _ _ _ _
-         | StatDirectApplication _ _ _
-         | StatConditional _ _ _ _
-         | StatExit _
-         | StatReturn _ _
-         | StatSwitch _ _ _ =>
-           state_fail Internal
-         end.
+  .
+
+  Definition eval_statement_pre
+    (stmt_pre: StatementPreT tags_t)
+    : env_monad tags_t unit
+  :=
+    eval_statement (MkStatement tags_t tags_dummy stmt_pre StmUnit)
+  .
+
+  Definition eval_block
+    (block: list (Statement tags_t))
+    : env_monad tags_t unit
+  :=
+    eval_statement_pre (StatBlock tags_t block)
+  .
+
+  Fixpoint eval_statements
+    (block: list (Statement tags_t))
+    : env_monad tags_t unit
+  :=
+    match block with
+    | nil =>
+      mret tt
+    | cons stmt block' =>
+      eval_statement stmt;;
+      eval_statements block'
+    end
+  .
 
   (* TODO: sophisticated pattern matching for the match expression as needed *)
   Fixpoint eval_match_expression (vals: list (Value tags_t)) (matches: list (Match tags_t)) : env_monad tags_t bool :=
