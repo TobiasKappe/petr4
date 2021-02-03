@@ -214,7 +214,6 @@ Section Syntax.
                                      PStatement (MkStatement t s typ))
       (PStatementMaybeNone: PStatementMaybe None)
       (PStatementMaybeSome: forall s, PStatementMaybe (Some s))
-      (PStatementsDummy: forall cs, PStatements cs)
       (PStatementsNil: PStatements nil)
       (PStatementsCons: forall c cs,
                                   PStatement c ->
@@ -225,7 +224,7 @@ Section Syntax.
     .
 
     Equations statementswitchcase_ind2 (c: StatementSwitchCase) : PStatementSwitchCase c := {
-      statementswitchcase_ind2 (StatSwCaseAction t l b) := PStatSwCaseAction t l b (PStatementsDummy b);
+      statementswitchcase_ind2 (StatSwCaseAction t l b) := PStatSwCaseAction t l b (statements_ind2 b);
       statementswitchcase_ind2 (StatSwCaseFallThrough t l) := PStatSwCaseFallThrough t l
     } where statementswitchcases_ind2 (cs: list StatementSwitchCase) : PStatementSwitchCases cs := {
       statementswitchcases_ind2 nil := PStatementSwitchCasesNil;
@@ -235,7 +234,7 @@ Section Syntax.
       statementpret_ind2 (StatAssignment l r) := PStatAssignment l r;
       statementpret_ind2 (StatDirectApplication t a) := PStatDirectApplication t a;
       statementpret_ind2 (StatConditional c t f) := PStatConditional c t f (statement_ind2 t) (statement_maybe_ind2 f);
-      statementpret_ind2 (StatBlock b) := PStatBlock b (PStatementsDummy b);
+      statementpret_ind2 (StatBlock b) := PStatBlock b (statements_ind2 b);
       statementpret_ind2 (StatExit) := PStatExit;
       statementpret_ind2 (StatEmpty) := PStatEmpty;
       statementpret_ind2 (StatReturn e) := PStatReturn e;
