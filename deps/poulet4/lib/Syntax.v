@@ -1,5 +1,6 @@
 Require Import Coq.Lists.List.
 Require Import Coq.Numbers.BinNums.
+Require Import Equations.Equations.
 
 Require Import Petr4.Info.
 Require Import Petr4.Typed.
@@ -140,7 +141,7 @@ Section Syntax.
   | StatSwLabName (tags: tags_t) (_: P4String).
 
   Inductive StatementSwitchCase :=
-  | StatSwCaseAction (tags: tags_t) (label: StatementSwitchLabel) (code: Block)
+  | StatSwCaseAction (tags: tags_t) (label: StatementSwitchLabel) (code: list Statement)
   | StatSwCaseFallThrough (tags: tags_t) (label: StatementSwitchLabel)
   with StatementPreT :=
   | StatMethodCall (func: Expression) (type_args: list (@P4Type tags_t))
@@ -148,7 +149,7 @@ Section Syntax.
   | StatAssignment (lhs: Expression) (rhs: Expression)
   | StatDirectApplication (typ: @P4Type tags_t) (args: list Expression)
   | StatConditional (cond: Expression) (tru: Statement) (fls: option Statement)
-  | StatBlock (block: Block)
+  | StatBlock (block: list Statement)
   | StatExit
   | StatEmpty
   | StatReturn (expr: option Expression)
@@ -156,14 +157,106 @@ Section Syntax.
   | StatConstant  (typ: @P4Type tags_t)
                  (name: P4String) (value: ValueBase)
   | StatVariable  (typ: @P4Type tags_t)
-                 (name: P4String) (init: option Expression)
+                  (name: P4String) (init: option Expression)
   | StatInstantiation  (typ: @P4Type tags_t)
-                      (args: list Expression) (name: P4String) (init: option Block)
+                       (args: list Expression) (name: P4String) (init: option (list Statement))
   with Statement :=
   | MkStatement (tags: tags_t) (stmt: StatementPreT) (typ: StmType)
-  with Block :=
-  | BlockEmpty (tags: tags_t)
-  | BlockCons (statement: Statement) (rest: Block).
+  .
+
+  Section Statement_ind2.
+
+    Variables
+      (PStatementSwitchCase: StatementSwitchCase -> Prop)
+      (PStatementSwitchCases: list StatementSwitchCase -> Prop)
+      (PStatementPreT: StatementPreT -> Prop)
+      (PStatement: Statement -> Prop)
+      (PStatementMaybe: option Statement -> Prop)
+      (PStatements: list Statement -> Prop)
+      (PStatementsMaybe: option (list Statement) -> Prop)
+    .
+
+    Hypotheses
+      (PStatSwCaseAction: forall t l b,
+                          PStatements b ->
+                          PStatementSwitchCase (StatSwCaseAction t l b))
+      (PStatSwCaseFallThrough: forall t l,
+                               PStatementSwitchCase (StatSwCaseFallThrough t l))
+      (PStatementSwitchCasesNil: PStatementSwitchCases nil)
+      (PStatementSwitchCasesCons: forall c cs,
+                                  PStatementSwitchCase c ->
+                                  PStatementSwitchCases cs ->
+                                  PStatementSwitchCases (c :: cs))
+      (PStatMethodCall: forall f ta a,
+                        PStatementPreT (StatMethodCall f ta a))
+      (PStatAssignment: forall l r,
+                        PStatementPreT (StatAssignment l r))
+      (PStatDirectApplication: forall t a,
+                               PStatementPreT (StatDirectApplication t a))
+      (PStatConditional: forall c t f,
+                         PStatement t ->
+                         PStatementMaybe f ->
+                         PStatementPreT (StatConditional c t f))
+      (PStatBlock: forall b,
+                   PStatements b -> PStatementPreT (StatBlock b))
+      (PStatExit: PStatementPreT StatExit)
+      (PStatEmpty: PStatementPreT StatEmpty)
+      (PStatReturn: forall e, PStatementPreT (StatReturn e))
+      (PStatSwitch: forall e c,
+                    PStatementSwitchCases c ->
+                    PStatementPreT (StatSwitch e c))
+      (PStatConstant: forall t n v, PStatementPreT (StatConstant t n v))
+      (PStatVariable: forall t n i, PStatementPreT (StatVariable t n i))
+      (PStatInstantiation: forall t a n b,
+                           PStatementsMaybe b ->
+                           PStatementPreT (StatInstantiation t a n b))
+      (PMkStatement: forall t s typ, PStatementPreT s ->
+                                     PStatement (MkStatement t s typ))
+      (PStatementMaybeNone: PStatementMaybe None)
+      (PStatementMaybeSome: forall s, PStatementMaybe (Some s))
+      (PStatementsDummy: forall cs, PStatements cs)
+      (PStatementsNil: PStatements nil)
+      (PStatementsCons: forall c cs,
+                                  PStatement c ->
+                                  PStatements cs ->
+                                  PStatements (c :: cs))
+      (PStatementsMaybeNone: PStatementsMaybe None)
+      (PStatementsMaybeSome: forall s, PStatementsMaybe (Some s))
+    .
+
+    Equations statementswitchcase_ind2 (c: StatementSwitchCase) : PStatementSwitchCase c := {
+      statementswitchcase_ind2 (StatSwCaseAction t l b) := PStatSwCaseAction t l b (PStatementsDummy b);
+      statementswitchcase_ind2 (StatSwCaseFallThrough t l) := PStatSwCaseFallThrough t l
+    } where statementswitchcases_ind2 (cs: list StatementSwitchCase) : PStatementSwitchCases cs := {
+      statementswitchcases_ind2 nil := PStatementSwitchCasesNil;
+      statementswitchcases_ind2 (c :: cs) := PStatementSwitchCasesCons c cs (statementswitchcase_ind2 c) (statementswitchcases_ind2 cs)
+    } where statementpret_ind2 (s: StatementPreT) : PStatementPreT s := {
+      statementpret_ind2 (StatMethodCall f ta a) := PStatMethodCall f ta a;
+      statementpret_ind2 (StatAssignment l r) := PStatAssignment l r;
+      statementpret_ind2 (StatDirectApplication t a) := PStatDirectApplication t a;
+      statementpret_ind2 (StatConditional c t f) := PStatConditional c t f (statement_ind2 t) (statement_maybe_ind2 f);
+      statementpret_ind2 (StatBlock b) := PStatBlock b (PStatementsDummy b);
+      statementpret_ind2 (StatExit) := PStatExit;
+      statementpret_ind2 (StatEmpty) := PStatEmpty;
+      statementpret_ind2 (StatReturn e) := PStatReturn e;
+      statementpret_ind2 (StatSwitch e c) := PStatSwitch e c (statementswitchcases_ind2 c);
+      statementpret_ind2 (StatConstant t n v) := PStatConstant t n v;
+      statementpret_ind2 (StatVariable t n i) := PStatVariable t n i;
+      statementpret_ind2 (StatInstantiation t a n b) := PStatInstantiation t a n b (statements_maybe_ind2 b)
+    } where statement_ind2 (s: Statement) : PStatement s := {
+      statement_ind2 (MkStatement t s typ) := PMkStatement t s typ (statementpret_ind2 s)
+    } where statement_maybe_ind2 (s: option Statement) : PStatementMaybe s := {
+      statement_maybe_ind2 None := PStatementMaybeNone;
+      statement_maybe_ind2 (Some s) := PStatementMaybeSome s
+    } where statements_ind2 (s: list Statement) : PStatements s := {
+      statements_ind2 nil := PStatementsNil;
+      statements_ind2 (c :: cs) := PStatementsCons c cs (statement_ind2 c) (statements_ind2 cs)
+    } where statements_maybe_ind2 (s: option (list Statement)) : PStatementsMaybe s := {
+      statements_maybe_ind2 None := PStatementsMaybeNone;
+      statements_maybe_ind2 (Some s) := PStatementsMaybeSome s
+    }.
+
+  End Statement_ind2.
 
   Scheme statement_mut := Induction for Statement Sort Prop
     with statementpre_mut := Induction for StatementPreT Sort Prop
