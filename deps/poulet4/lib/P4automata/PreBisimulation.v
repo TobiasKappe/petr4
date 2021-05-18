@@ -458,3 +458,120 @@ Proof.
     apply chunked_related_subset with (R1 := checked); auto.
     solve_incl.
 Qed.
+
+Inductive close
+  {a1 a2: p4automaton}
+  (R: configuration a1 -> configuration a2 -> Prop)
+  : configuration a1 -> configuration a2 -> Prop
+:=
+| CloseBase:
+    forall c1 c2,
+      R c1 c2 -> close _ c1 c2
+| CloseStep:
+    forall s1 st1 buf1 s2 st2 buf2 b,
+      close _ (inl s1, st1, buf1)
+              (inl s2, st2, buf2) ->
+      length buf1 + 1 < size a1 s1 ->
+      length buf2 + 1 < size a2 s2 ->
+      close _ (inl s1, st1, buf1 ++ b :: nil)
+              (inl s2, st2, buf2 ++ b :: nil)
+.
+
+Lemma close_compatible
+  {a1 a2: p4automaton}
+  (R: configuration a1 -> configuration a2 -> Prop)
+:
+  (forall c1 c2, R c1 c2 -> bisimilar c1 c2) ->
+  (forall c1 c2, close R c1 c2 -> bisimilar c1 c2)
+.
+Proof.
+  intros.
+  induction H0.
+  - firstorder.
+  - destruct IHclose as [R' [? ?]].
+    exists R'.
+    split; auto.
+    specialize (H3 (inl s1, st1, buf1) (inl s2, st2, buf2) H4).
+    destruct H3 as [_ ?].
+    specialize (H3 b).
+    simpl in H3.
+    repeat rewrite app_length in H3.
+    simpl length in H3.
+    destruct (equiv_dec (length buf1 + 1) (size a1 s1)),
+             (equiv_dec (length buf2 + 1) (size a2 s2));
+    unfold "===", complement in *; try lia.
+    exact H3.
+Qed.
+
+Definition progresses'
+  {a1 a2: p4automaton}
+  (expanded: chunked_relation a1 a2)
+  (front: chunked_relation a1 a2)
+:=
+  forall c1 c2 b,
+    chunked_related expanded c1 c2 ->
+    close (chunked_related (front ++ expanded))
+          (step c1 b)
+          (step c2 b)
+.
+
+Definition pre_bisimulation'
+  {a1 a2: p4automaton}
+  (expanded: chunked_relation a1 a2)
+  (front: chunked_relation a1 a2)
+:=
+  acceptance_ok expanded ->
+  progresses' expanded front ->
+  forall c1 c2,
+    chunked_related (front ++ expanded) c1 c2 ->
+    bisimilar c1 c2
+.
+
+Lemma pre_bisimulation_skip'
+  {a1 a2: p4automaton}
+  (checked: chunked_relation a1 a2)
+  (front: chunked_relation a1 a2)
+  (R: configuration a1 -> configuration a2 -> Prop)
+:
+  (forall c1 c2, R c1 c2 -> close (chunked_related checked) c1 c2) ->
+  pre_bisimulation checked front ->
+  pre_bisimulation checked (R :: front)
+.
+Proof.
+  unfold pre_bisimulation.
+  intros.
+  assert (
+    acceptance_ok checked ->
+    progresses' checked front ->
+    forall (c1 : configuration a1) (c2 : configuration a2),
+    close (chunked_related (front ++ checked)) c1 c2 -> bisimilar c1 c2
+  ).
+  intros.
+  apply close_compatible with (R0 := (chunked_related (front ++ checked))); auto.
+  apply H4; auto.
+  - admit.
+    (*intros c1' c2' ? ?.
+    apply (H2 _ _ b) in H4.
+    rewrite <- app_comm_cons in H4.
+    inversion H4; subst; auto.
+    apply H in H7.
+    apply chunked_related_subset with (R1 := checked); auto.
+    solve_incl. *)
+  - rewrite <- app_comm_cons in H3.
+    inversion H3; subst; auto.
+    + apply H in H7.
+      induction H7.
+      * constructor.
+        apply chunked_related_subset with (R1 := checked); auto.
+        solve_incl.
+      * apply CloseStep; auto.
+        apply IHclose; auto.
+        rewrite app_comm_cons.
+        unfold progresses in H2.
+        apply H2.
+
+    + now constructor.
+    apply H in H6.
+    apply chunked_related_subset with (R1 := checked); auto.
+    solve_incl.
+Qed.
